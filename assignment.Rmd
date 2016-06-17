@@ -1,0 +1,136 @@
+###title: "Activity recognition and prediciton of weighting lifting exercise "
+date: "June 17, 2016"
+output: html document
+
+#### summary: Data from accelerometers on belt, forearm, arm and dumbell of 6 participants are collected when they were doing weight lifting exercises. In this report, I built predictive models to access the quality (5 classes) performed on this exercise and investigate whether we could determine qualitative activity recognitions of weight lift exercises.
+
+#### Download, load, and clean data
+```{r load_data, warning=F, message=FALSE,cache=TRUE, echo=TRUE, message=FALSE}
+# fileUrl1<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+# pml_training<-download.file(fileUrl1,destfile="~/Documents/OneDrive/DataSci/MachineLearning/pml_training.csv", method="curl")
+# fileUrl2<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+# pml_testing<-download.file(fileUrl2,destfile="~/Documents/OneDrive/DataSci/MachineLearning/pml_testing.csv", method="curl")
+training<-read.csv("~/Documents/OneDrive/DataSci/MachineLearning/pml_training.csv",header=T,na.strings=c("","NA","NULL"))
+testing<-read.csv("~/Documents/OneDrive/DataSci/MachineLearning/pml_testing.csv",header=T,na.strings=c("","NA","NULL"))
+dim(training);dim(testing); # 'str(training[,1:10])' to see part of the columns
+# get rid of the columns with any NAs
+trainingNoNAs<-training[, colSums(is.na(training))==0]
+
+# remove all the time variables and columns which doesn't correlate with the "classe" variable.
+finaltrain<-trainingNoNAs[,-c(1,2,3,4,5,6,7)]
+dim(finaltrain)
+# partition the training data into training and validation dataset, so we can test on validation dataset
+```
+
+#### Preprocessing data to removing near zero covariate, identifying correlated parameters and to center and scale the data
+
+```{r,warning=F, message=FALSE,cache=TRUE, echo=TRUE, message=FALSE}
+# removing near zero covariate if any
+library(caret)
+nzv<-nearZeroVar(finaltrain, saveMetric=TRUE)
+filteredTrain<-finaltrain[,nzv$nzv==FALSE]
+# dim(filteredTrain) 
+
+# identifying correlated Predictors
+trainingCor<-cor(filteredTrain[,-53])
+
+# look at which of these correlation (which columns) is greater than 0.75
+highlyCorrelated<-findCorrelation(trainingCor,cutoff=0.75)
+Train<-filteredTrain[,-highlyCorrelated]
+filteredCorrelation<-cor(Train[,-32])
+summary(filteredCorrelation[upper.tri(filteredCorrelation)])
+
+# split the data into training data and validation data. The validation data is used to check the accuray of the model based on training data.
+set.seed(160610)
+trainIndex<-createDataPartition(Train$classe,p=0.75,list=FALSE)
+trainingSet<-Train[trainIndex,]
+validation<-Train[-trainIndex,]
+
+# Centering and Scaling the both training and valdiation data
+preProcValues<-preProcess(trainingSet[,-32],method=c("center","scale"))
+trainCS<-predict(preProcValues,trainingSet)
+validationCS<-predict(preProcValues,validation)
+
+# head(trainCS[,20:32]) --check data
+```
+
+#### Model selection and tuning
+_Develop training model using random forest model(random forest model takes about 26min to run on my system using caret::train). By using random forest model, the cross validation is automatically._
+
+```{r warning=F, message=FALSE,cache=TRUE, echo=TRUE, message=FALSE}
+x <- trainCS[,-32]
+y <- trainCS[,32]
+
+#Configure parallel processing to improve the runtime performance
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+
+# Configure trainControl object. the number that specifies the quantity of folds for k-fold cross-validation
+fitControl <- trainControl(method = "cv",
+                           number = 10,
+                           repeats=10,
+                           allowParallel = TRUE)
+
+fit <- train(x,y,data=trainCS,method="rf",trControl =fitControl)
+
+# De-register parallel processing cluster
+stopCluster(cluster)
+```
+
+#### assesssing the suitablity of the random forest model
+```{r warning=F, message=FALSE,cache=TRUE, echo=TRUE, message=FALSE}
+# accessing OBB error rate, note the error is very small, suggesting the model is good one
+print(fit$finalModel) # fit$resample; confusionMatrix.train(fit)
+# predict on the validation data set 
+pred.fit<-predict(fit,validationCS) # default, type="class"
+# measure model performance
+confusionMatrix(pred.fit,validationCS[,32])
+# varImp(fit)  # to show the most important variables
+
+# grab the same predicator variables for the 20 test cases
+f<-c(colnames(Train[,-32]))
+testCase<-testing[,f]
+
+# because I have pre-processed the training and valdiation data by "center" and "scale" them, therefore I also preProcess the 20 test cases (by centering and scaling) the same way from above
+testCS<-predict(preProcValues,testCase)
+pred_1<-predict(fit,testCS)
+print(pred_1) 
+# I got 100% for the final quiz, suggesting the model performs well.
+
+```
+  
+_Note, just to be sure, I also tested the GBM model, this takes about 15 min to run with multi-thread on my system and the accuracy is about 98.7% and it is less accurate compared to the random forest model. The R code is following_:  
+
+```{r}
+# establishing gbm model (the code for this assignment here is inactive to save HTML knit time), note, we need use the same paralle processing as above to improve runtime performance
+#set.seed(825)
+#gbmFit1<-train(x,y,method="gbm",trControl =fitControl,verbose=FALSE)
+#gbmFit1
+#gbmFit1$resample
+#confusionMatrix.train(gbmFit1)
+#pred.gbm<-predict(gbmFit1,validationCS[,-32])
+#head(validationCS[,20:32])
+#confusionMatrix(pred.gbm,validationCS[,32])
+```
+
+_Also note, I also tried the linear discriminant analysese model, the accuracy is the lowest. The code is following :_  
+```{r}
+# establishing lda model (the code for this assignment here is inactive to save HTML knit time). 
+#set.seed(160616)
+# lda.fit<-train(x,y,method="lda")
+# pred.lda <- predict(lda.fit,validationCS[,-32])
+# confusionMatrix(pred.lda,validationCS[,32]) # the accuracy is much lower than random forest and gradient boosting model.
+```
+
+#### Conclusion: It is possible to recognize and classify how well the activity were performed by using a random forest model. This model performs the best compared to gbm and lda models on the validation data set. The model is able to correctly predict the classes on test cases.
+
+#### Citation  
+The data for this project come from [this source](http://groupware.les.inf.puc-rio.br/har]).
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+#### Acknowledgement  
+Special thanks go to Leonard Greski, the Mentor of Practical Machine Learning for his article on "Improving Performance of Random Forest in caret::train()"
+
+
