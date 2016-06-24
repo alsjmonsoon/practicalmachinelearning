@@ -2,9 +2,35 @@
 date: "June 17, 2016"
 output: html document
 
-#### summary: Data from accelerometers on belt, forearm, arm and dumbell of 6 participants are collected when they were doing weight lifting exercises. In this report, I built predictive models to access the quality (5 classes) performed on this exercise and investigate whether we could determine qualitative activity recognitions of weight lift exercises.
+#### summary: Data from accelerometers on belt, forearm, arm and dumbbell of 6 participants are collected when they were doing weight lifting exercises. In this report, I built predictive models to access the quality (5 classes) performed on this exercise and investigate whether we could determine qualitative activity recognitions of weight lift exercises.
 
 #### Download, load, and clean data
+Six participates were asked to perform on set of 10 repetitions of the _Unilateral Dumbbell Biceps Curl_ in five different fashions:
+        ..* Class A: exactly according to the specification
+        ..* Class B: throwing the elbows to the front
+        ..* Class C: lifting the dumbbell only halfway
+        ..* Class D: lowering the dumbbell only halfway
+        ..* Class E: throwing the hips to the front
+        
+For data recordig four 9 degrees of freedom Razor inertial measurement units (IMU), which provide the three-axes acceleration, gyroscope and magnetometer data at a joint sampling rate of 45Hz.
+
+
+Each IMU had following sensors:
+        * Accelerometer(X,Y,Z). Measures accelerations, changes in positions and orientation sensor in the UP-DOWN plane.
+        * Gyroscope (X,Y,Z). Measures either changes in orientation or rotational velocity.
+        * Magnetometer (X,Y,Z). Measures magnetic fields, used as a compass to determine north, south, east and west orientation.
+        
+The IUM were mounted at: Arm, forearm, belt and dumbbell.
+
+For feature extraction a sliding window approach with different lengths from 0.5 second to 2.5 seconds, with 0.5 second overlap. In each step of the sliding window approach they calculated features on the Euler angles (roll, pitch and yaw), as well as the raw accelerometer, gyroscope and magnetometer readings. For the Euler angles of each of the four sensors we calculated eight features: mean, variance, standard deviation, max, min, amplitude, kurtosis and skewness.
+
+Total number of measured variables: 160
+
+        * 4 IMU's times of Acc(x,y,z), Gyro(x,y,z), Magno(x,y,z) = 36
+        * 4 Roll, Pitch, Yaw derived values (29) = 116
+        * ID, Subject, Time related variables = 7
+        * Classe = 1
+
 ```{r load_data, warning=F, message=FALSE,cache=TRUE, echo=TRUE, message=FALSE}
 # fileUrl1<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
 # pml_training<-download.file(fileUrl1,destfile="~/Documents/OneDrive/DataSci/MachineLearning/pml_training.csv", method="curl")
@@ -15,8 +41,12 @@ testing<-read.csv("~/Documents/OneDrive/DataSci/MachineLearning/pml_testing.csv"
 dim(training);dim(testing); # 'str(training[,1:10])' to see part of the columns
 # get rid of the columns with any NAs
 trainingNoNAs<-training[, colSums(is.na(training))==0]
+# alternatively we can remove columns with more than 95% of NA or "" values
+# threshold <- dim(trainingData)[1] * 0.95
+# goodColumns <- !apply(trainingData, 2, function(x) sum(is.na(x)) > threshold  || sum(x=="") > threshold)
+# trainingData <- trainingData[, goodColumns]
 
-# remove all the time variables and columns which doesn't correlate with the "classe" variable.
+# The investigation is focused on determining whether an assessment can be made based on specific measurements of execution of a set of activities. Therefore, features used in the analysis are non-user, none-time, none-sensor specific features. remove all the time variables and columns which doesn't correlate with the "classe" variable.
 finaltrain<-trainingNoNAs[,-c(1,2,3,4,5,6,7)]
 dim(finaltrain)
 # partition the training data into training and validation dataset, so we can test on validation dataset
@@ -30,6 +60,7 @@ library(caret)
 nzv<-nearZeroVar(finaltrain, saveMetric=TRUE)
 filteredTrain<-finaltrain[,nzv$nzv==FALSE]
 # dim(filteredTrain) 
+# class(filteredTrain$classe)
 
 # identifying correlated Predictors
 trainingCor<-cor(filteredTrain[,-53])
@@ -83,10 +114,15 @@ stopCluster(cluster)
 ```{r warning=F, message=FALSE,cache=TRUE, echo=TRUE, message=FALSE}
 # accessing OBB error rate, note the error is very small, suggesting the model is good one
 print(fit$finalModel) # fit$resample; confusionMatrix.train(fit)
+
+
 # predict on the validation data set 
 pred.fit<-predict(fit,validationCS) # default, type="class"
 # measure model performance
 confusionMatrix(pred.fit,validationCS[,32])
+#  alternatively, we could calcuate the OOB rate using
+OOB_err_rate=sum(pred.fit!=valdiationCS[,32])/length(validationCS[,32])
+OOB_err_rate
 # varImp(fit)  # to show the most important variables
 
 # grab the same predicator variables for the 20 test cases
@@ -96,7 +132,17 @@ testCase<-testing[,f]
 # because I have pre-processed the training and valdiation data by "center" and "scale" them, therefore I also preProcess the 20 test cases (by centering and scaling) the same way from above
 testCS<-predict(preProcValues,testCase)
 pred_1<-predict(fit,testCS)
-print(pred_1) 
+
+# alternative using following code to generate answers for the test case:
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(testCS)
+
 # I got 100% for the final quiz, suggesting the model performs well.
 
 ```
